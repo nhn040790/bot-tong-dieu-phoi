@@ -59,7 +59,7 @@ const BRAINS = {
     kind: 'gemini',
     keyEnv: 'GEMINI_API_KEY',
     modelEnv: 'GEMINI_MODEL',
-    defaultModel: 'gemini-2.5-flash',
+    defaultModel: 'gemini-3.8-flash',
     style: 'Bạn là "Học Việc" — trợ lý đa năng, nhận mọi việc được giao, trả lời rõ ràng và hữu ích.',
   },
 };
@@ -84,7 +84,7 @@ function systemPrompt(b) {
   return `${b.style}\n${SHOP_CONTEXT}`;
 }
 
-async function fetchJSON(url, options, timeoutMs = 60000) {
+async function fetchJSON(url, options, timeoutMs = 120000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -164,6 +164,12 @@ async function callAnthropic(b, key, userText) {
   return text.trim();
 }
 
+// Lỗi tạm thời (treo kết nối, bị ngắt, lỗi 5xx phía nhà cung cấp) thì đáng thử lại 1 lần
+function isRetryable(err) {
+  if (err.status >= 500) return true;
+  return /aborted|abort|fetch failed|network|socket|timeout|timed out|ECONN|ETIMEDOUT/i.test(err.message || '');
+}
+
 // Hỏi 1 bộ não cụ thể — trả { ok, text } hoặc { ok:false, reason }
 async function ask(id, userText) {
   const b = BRAINS[id];
@@ -173,8 +179,19 @@ async function ask(id, userText) {
   const gate = quota.canUse(id);
   if (!gate.ok) return { ok: false, reason: gate.reason, until: gate.until };
 
+  const callOnce = () =>
+    b.kind === 'anthropic' ? callAnthropic(b, key, userText) : b.kind === 'gemini' ? callGemini(b, key, userText) : callOpenAIStyle(b, key, userText);
+
   try {
-    const text = b.kind === 'anthropic' ? await callAnthropic(b, key, userText) : b.kind === 'gemini' ? await callGemini(b, key, userText) : await callOpenAIStyle(b, key, userText);
+    let text;
+    try {
+      text = await callOnce();
+    } catch (e1) {
+      if (!isRetryable(e1)) throw e1;
+      console.error(`Bộ não ${id} lỗi tạm thời (${e1.message}) — thử lại sau 2 giây`);
+      await new Promise((r) => setTimeout(r, 2000));
+      text = await callOnce();
+    }
     quota.recordUse(id);
     return { ok: true, text };
   } catch (err) {
