@@ -269,10 +269,17 @@ app.listen(PORT, async () => {
   const base = process.env.RENDER_EXTERNAL_URL;
   if (base && process.env.BOT_TOKEN) {
     const url = `${base}/${WEBHOOK_SECRET}`;
-    const r = await tg.setWebhook(url);
-    console.log('Đặt webhook:', url, r.ok ? 'OK' : r.description);
-    const c = await tg.setCommands();
-    console.log('Đăng ký menu lệnh:', c.ok ? 'OK' : c.description);
+    // Đăng ký webhook + menu lệnh: mạng tới Telegram chập chờn lúc khởi động thì thử lại, không để sập deploy
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const r = await tg.setWebhook(url);
+      console.log(`Đặt webhook (lần ${attempt}):`, r.ok ? 'OK' : r.description);
+      if (r.ok) {
+        const c = await tg.setCommands();
+        console.log('Đăng ký menu lệnh:', c.ok ? 'OK' : c.description);
+        break;
+      }
+      if (attempt < 3) await new Promise((res) => setTimeout(res, 5000));
+    }
   } else {
     console.log('Chưa có RENDER_EXTERNAL_URL/BOT_TOKEN — bỏ qua đặt webhook.');
   }

@@ -2,16 +2,22 @@
 const TOKEN = process.env.BOT_TOKEN;
 
 async function call(method, body, token) {
-  const res = await fetch(`https://api.telegram.org/bot${token || TOKEN}/${method}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!data.ok) {
-    console.error(`Telegram API ${method} lỗi:`, data.description);
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token || TOKEN}/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      console.error(`Telegram API ${method} lỗi:`, data.description);
+    }
+    return data;
+  } catch (err) {
+    // Lỗi mạng (timeout, không phân giải được...) — chỉ ghi log, TUYỆT ĐỐI không ném ra ngoài làm sập tiến trình
+    console.error(`Telegram API ${method} lỗi mạng:`, err.message);
+    return { ok: false, description: `network: ${err.message}` };
   }
-  return data;
 }
 
 function sendMessage(chatId, text, extra = {}) {
