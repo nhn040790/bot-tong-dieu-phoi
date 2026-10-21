@@ -2,6 +2,7 @@
 // GPT (OpenAI) = "Thợ Chữ" — viết lách, dịch thuật
 // Claude (Anthropic) = "Tham Mưu" — phân tích, tư vấn, lập kế hoạch
 // Grok (xAI) = "Thám Tử" — tra cứu, hỏi đáp nhanh
+// DeepSeek = "Thợ Tính" — suy luận, tính toán, code, giá rẻ
 // Gemini (Google) = "Học Việc" — MIỄN PHÍ, dự phòng khi các não kia hết lượt/chưa có key
 // Key + model cấu hình qua biến môi trường; đổi model không cần sửa code.
 const quota = require('./quota');
@@ -18,58 +19,89 @@ const SHOP_CONTEXT = [
 const BRAINS = {
   gpt: {
     id: 'gpt',
-    name: 'Thợ Chữ',
-    icon: '✍️',
+    name: 'Yua Mikami',
+    icon: '🌸💋',
     brand: 'GPT',
     kind: 'openai',
     base: 'https://api.openai.com/v1',
     keyEnv: 'OPENAI_API_KEY',
     modelEnv: 'OPENAI_MODEL',
     defaultModel: 'gpt-4o-mini',
-    style: 'Bạn là "Thợ Chữ" — chuyên viết lách: caption, bài đăng, tin nhắn chăm sóc khách, dịch Nhật↔Việt, đặt tiêu đề/slogan. Văn phong tự nhiên, cuốn hút nhưng không lố.',
+    style: 'chuyên viết lách: caption, bài đăng, tin nhắn chăm sóc khách, dịch Nhật↔Việt, đặt tiêu đề/slogan. Văn phong tự nhiên, cuốn hút nhưng không lố.',
   },
   claude: {
     id: 'claude',
-    name: 'Tham Mưu',
-    icon: '🧭',
+    name: 'Eimi Fukada',
+    icon: '😏🔥',
     brand: 'Claude',
     kind: 'anthropic',
     keyEnv: 'ANTHROPIC_API_KEY',
     modelEnv: 'ANTHROPIC_MODEL',
     defaultModel: 'claude-haiku-4-5',
-    style: 'Bạn là "Tham Mưu" — chuyên phân tích, tư vấn quyết định, lập kế hoạch, chỉ ra rủi ro và điểm mù. Trình bày có cấu trúc, kết luận rõ ràng, có lý do.',
+    style: 'chuyên phân tích, tư vấn quyết định, lập kế hoạch, chỉ ra rủi ro và điểm mù. Trình bày có cấu trúc, kết luận rõ ràng, có lý do.',
   },
   grok: {
     id: 'grok',
-    name: 'Thám Tử',
-    icon: '🔎',
+    name: 'Yui Hatano',
+    icon: '👑💋',
     brand: 'Grok',
     kind: 'openai',
     base: 'https://api.x.ai/v1',
     keyEnv: 'XAI_API_KEY',
     modelEnv: 'XAI_MODEL',
     defaultModel: 'grok-3-mini',
-    style: 'Bạn là "Thám Tử" — chuyên tra cứu, giải đáp thắc mắc, kiểm chứng thông tin. Trả lời thẳng thắn, súc tích, phân biệt rõ điều chắc chắn và điều suy đoán.',
+    style: 'chuyên tra cứu, giải đáp thắc mắc, kiểm chứng thông tin. Trả lời thẳng thắn, súc tích, phân biệt rõ điều chắc chắn và điều suy đoán.',
+  },
+  deepseek: {
+    id: 'deepseek',
+    name: 'Sora Aoi',
+    icon: '💙🌊',
+    brand: 'DeepSeek',
+    kind: 'openai',
+    base: 'https://api.deepseek.com',
+    keyEnv: 'DEEPSEEK_API_KEY',
+    modelEnv: 'DEEPSEEK_MODEL',
+    defaultModel: 'deepseek-chat',
+    style: 'chuyên suy luận, tính toán, việc kỹ thuật và lập trình. Trình bày rõ ràng, có bước đi, kiểm tra lại kết quả trước khi kết luận.',
   },
   gemini: {
     id: 'gemini',
-    name: 'Học Việc',
-    icon: '🌱',
+    name: 'Tsukasa Aoi',
+    icon: '✨🌙',
     brand: 'Gemini',
     kind: 'gemini',
     keyEnv: 'GEMINI_API_KEY',
     modelEnv: 'GEMINI_MODEL',
     defaultModel: 'gemini-3.8-flash',
-    style: 'Bạn là "Học Việc" — trợ lý đa năng, nhận mọi việc được giao, trả lời rõ ràng và hữu ích.',
+    style: 'là trợ lý đa năng, nhận mọi việc được giao, trả lời rõ ràng và hữu ích.',
   },
 };
 
-const ORDER = ['gpt', 'claude', 'grok', 'gemini'];
+const ORDER = ['gpt', 'claude', 'grok', 'deepseek', 'gemini'];
+
+// Tên + biểu tượng hiển thị có thể đổi ngay trên Render, không cần sửa code:
+// BRAIN_NAME_GPT / BRAIN_ICON_GPT / BRAIN_NAME_CLAUDE / ... (để trống = dùng mặc định)
+function label(id) {
+  const b = BRAINS[id];
+  return {
+    name: process.env[`BRAIN_NAME_${id.toUpperCase()}`] || b.name,
+    icon: process.env[`BRAIN_ICON_${id.toUpperCase()}`] || b.icon,
+  };
+}
 
 function getKey(b) {
   if (process.env[b.keyEnv]) return process.env[b.keyEnv];
   if (b.id === 'gemini' && process.env.GOOGLE_AI_API_KEY) return process.env.GOOGLE_AI_API_KEY;
   return '';
+}
+
+// Token tài khoản bot RIÊNG của từng bộ não (tạo qua BotFather, dán vào Render):
+// có token => bộ não tự gửi tin bằng tài khoản của mình (tên + avatar riêng trong nhóm);
+// chưa có => Bot Tổng gửi thay kèm nhãn tên như cũ.
+const BOT_TOKEN_ENVS = { gpt: 'BOT_TOKEN_GPT', claude: 'BOT_TOKEN_CLAUDE', grok: 'BOT_TOKEN_GROK', deepseek: 'BOT_TOKEN_DEEPSEEK', gemini: 'BOT_TOKEN_GEMINI' };
+
+function botToken(id) {
+  return process.env[BOT_TOKEN_ENVS[id]] || '';
 }
 
 function hasKey(id) {
@@ -81,7 +113,8 @@ function modelOf(b) {
 }
 
 function systemPrompt(b) {
-  return `${b.style}\n${SHOP_CONTEXT}`;
+  const L = label(b.id);
+  return `Tên của bạn là "${L.name}" — một thành viên trong đội trợ lý AI của shop, ${b.style}\n${SHOP_CONTEXT}`;
 }
 
 async function fetchJSON(url, options, timeoutMs = 120000) {
@@ -212,14 +245,16 @@ async function ask(id, userText) {
 function statusList() {
   return ORDER.map((id) => {
     const b = BRAINS[id];
+    const L = label(id);
     const gate = quota.canUse(id);
     return {
       id,
-      name: b.name,
-      icon: b.icon,
+      name: L.name,
+      icon: L.icon,
       brand: b.brand,
       model: modelOf(b),
       hasKey: hasKey(id),
+      hasBot: Boolean(botToken(id)),
       used: quota.usedToday(id),
       cap: quota.CAP,
       available: hasKey(id) && gate.ok,
@@ -229,4 +264,4 @@ function statusList() {
   });
 }
 
-module.exports = { BRAINS, ORDER, ask, hasKey, statusList };
+module.exports = { BRAINS, ORDER, ask, hasKey, statusList, label, botToken };
