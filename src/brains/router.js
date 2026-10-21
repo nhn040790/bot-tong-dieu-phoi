@@ -26,7 +26,7 @@ async function askAuto(text) {
     if (!brains.hasKey(id)) continue;
     const r = await brains.ask(id, text);
     if (r.ok) return { ok: true, brainId: id, text: r.text, fellBack: id !== start };
-    notes.push(`${brains.BRAINS[id].name}: ${r.reason}`);
+    notes.push(`${brains.BRAINS[id].name}: ${r.reason}${r.message ? ' — ' + r.message : ''}`);
   }
   return { ok: false, notes };
 }

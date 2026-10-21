@@ -56,8 +56,7 @@ const BRAINS = {
     name: 'Học Việc',
     icon: '🌱',
     brand: 'Gemini',
-    kind: 'openai',
-    base: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    kind: 'gemini',
     keyEnv: 'GEMINI_API_KEY',
     modelEnv: 'GEMINI_MODEL',
     defaultModel: 'gemini-2.5-flash',
@@ -120,6 +119,27 @@ async function callOpenAIStyle(b, key, userText) {
   return text.trim();
 }
 
+// Gemini qua API chính thức (generateContent) — ổn định nhất cho key lấy từ AI Studio
+async function callGemini(b, key, userText) {
+  const { status, data } = await fetchJSON(`https://generativelanguage.googleapis.com/v1beta/models/${modelOf(b)}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: systemPrompt(b) }] },
+      contents: [{ parts: [{ text: userText }] }],
+      generationConfig: { maxOutputTokens: 2000 },
+    }),
+  });
+  if (status !== 200) {
+    const msg = (data.error && data.error.message) || `HTTP ${status}`;
+    throw Object.assign(new Error(msg), { status, code: data.error && data.error.status });
+  }
+  const parts = data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
+  const text = (parts || []).map((p) => p.text || '').join('\n').trim();
+  if (!text) throw new Error('Bộ não trả về rỗng');
+  return text;
+}
+
 async function callAnthropic(b, key, userText) {
   const { status, data } = await fetchJSON('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -154,7 +174,7 @@ async function ask(id, userText) {
   if (!gate.ok) return { ok: false, reason: gate.reason, until: gate.until };
 
   try {
-    const text = b.kind === 'anthropic' ? await callAnthropic(b, key, userText) : await callOpenAIStyle(b, key, userText);
+    const text = b.kind === 'anthropic' ? await callAnthropic(b, key, userText) : b.kind === 'gemini' ? await callGemini(b, key, userText) : await callOpenAIStyle(b, key, userText);
     quota.recordUse(id);
     return { ok: true, text };
   } catch (err) {
