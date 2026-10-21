@@ -117,6 +117,15 @@ function systemPrompt(b) {
   return `Tên của bạn là "${L.name}" — một thành viên trong đội trợ lý AI của shop, ${b.style}\n${SHOP_CONTEXT}`;
 }
 
+// Trích thông điệp lỗi từ phản hồi của hãng — xAI trả error dạng CHUỖI, OpenAI/Anthropic/Gemini trả dạng OBJECT có .message
+function errMsg(data, status) {
+  const e = data && data.error;
+  if (typeof e === 'string' && e) return e;
+  if (e && e.message) return e.message;
+  if (data && data.message) return data.message;
+  return `HTTP ${status}`;
+}
+
 async function fetchJSON(url, options, timeoutMs = 120000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -144,7 +153,7 @@ async function callOpenAIStyle(b, key, userText) {
     }),
   });
   if (status !== 200) {
-    const msg = (data.error && data.error.message) || `HTTP ${status}`;
+    const msg = errMsg(data, status);
     throw Object.assign(new Error(msg), { status, code: data.error && data.error.code });
   }
   const text = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
@@ -164,7 +173,7 @@ async function callGemini(b, key, userText) {
     }),
   });
   if (status !== 200) {
-    const msg = (data.error && data.error.message) || `HTTP ${status}`;
+    const msg = errMsg(data, status);
     throw Object.assign(new Error(msg), { status, code: data.error && data.error.status });
   }
   const parts = data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
@@ -189,7 +198,7 @@ async function callAnthropic(b, key, userText) {
     }),
   });
   if (status !== 200) {
-    const msg = (data.error && data.error.message) || `HTTP ${status}`;
+    const msg = errMsg(data, status);
     throw Object.assign(new Error(msg), { status, code: data.error && data.error.type });
   }
   const text = (data.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
