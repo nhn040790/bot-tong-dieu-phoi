@@ -8,6 +8,7 @@ const cron = require('node-cron');
 const tg = require('./telegram');
 const exchange = require('./workers/exchange');
 const leads = require('./workers/leads');
+const revenue = require('./workers/revenue');
 const brains = require('./brains/brains');
 const router = require('./brains/router');
 
@@ -36,6 +37,7 @@ const HELP = [
   '/lead 0984777000 Nguyen Van A — ghi lead vào Google Sheet',
   '/leads — lead hôm nay',
   '/baocao — báo cáo lead trong ngày',
+  '/doanhthu — doanh thu hôm qua (đơn đã cọc trở đi, từ Sheet đơn hàng; /doanhthu 16/10/2026 để xem ngày khác)',
   '/id — xem ID của bạn và ID nhóm',
   '',
   '🧠 <b>Các bộ não AI:</b>',
@@ -47,6 +49,7 @@ const HELP = [
   '<i>Lệnh tắt theo tên: /yua · /eimi · /yui · /sora · /tsukasa (dùng thay cho các lệnh trên)</i>',
   '/hoi3nao &lt;câu hỏi&gt; — hỏi tất cả các bộ não để so sánh',
   '/nao — trạng thái + lượt dùng hôm nay của các bộ não',
+  '/phanviec — bảng phân việc: nàng nào phụ trách mảng nào',
   '',
   '<i>Nhắn tự do cũng được: "tỷ giá", "3kg bay", "lead 09xxxx tên khách"...</i>',
   '<i>Hoặc giao 1 việc bất kỳ (vd "viết caption bán giày Nhật") → Bot Tổng tự chọn bộ não phù hợp.</i>',
@@ -175,6 +178,27 @@ async function handleMessage(msg) {
       const rows = await leads.getLeadsToday();
       return tg.sendMessage(chatId, leads.formatLeadList(rows, '📋 <b>Lead hôm nay</b>'));
     }
+    if (text.startsWith('/doanhthu')) {
+      if (!revenue.configured()) {
+        return tg.sendMessage(chatId, '⚠️ Chưa nối Sheet doanh thu (thiếu REVENUE_SHEET_ID trên Render).');
+      }
+      await tg.sendTyping(chatId);
+      const arg = text.slice('/doanhthu'.length).trim();
+      try {
+        const m = arg.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (m) {
+          const ds = `${m[1].padStart(2, '0')}/${m[2].padStart(2, '0')}/${m[3]}`;
+          return tg.sendMessage(chatId, await revenue.reportFor(ds));
+        }
+        if (arg === 'homnay' || arg === 'hôm nay') {
+          return tg.sendMessage(chatId, await revenue.reportFor(revenue.todayStr()));
+        }
+        return tg.sendMessage(chatId, await revenue.reportYesterday());
+      } catch (e) {
+        console.error('Lỗi /doanhthu:', e.message);
+        return tg.sendMessage(chatId, '⚠️ Không đọc được Sheet doanh thu. Kiểm tra REVENUE_SHEET_ID và quyền chia sẻ file cho tài khoản bot.');
+      }
+    }
 
     // --- Giai đoạn 2: các bộ não AI (có lệnh tắt theo tên riêng) ---
     const BRAIN_ALIASES = { yua: 'gpt', eimi: 'claude', yui: 'grok', sora: 'deepseek', tsukasa: 'gemini' };
@@ -199,6 +223,20 @@ async function handleMessage(msg) {
         else await tg.sendMessage(chatId, `❌ ${brains.label(r.brainId).name} không trả lời được (${BRAIN_REASONS[r.reason] || r.reason}${r.message ? ' — ' + String(r.message).slice(0, 200) : ''}).`);
       }
       return;
+    }
+    if (text.startsWith('/phanviec') || text.startsWith('/viec')) {
+      const lines = [
+        '📋 <b>Bảng phân việc — đội trợ lý AI HikariGo:</b>',
+        '',
+        '🌸💋 <b>Yua Mikami</b> (GPT) — <b>Thợ Chữ</b>: nội dung & chăm khách — viết caption, bài đăng, tin nhắn mẫu, dịch Nhật↔Việt, slogan. → /yua',
+        '😏🔥 <b>Eimi Fukada</b> (Claude) — <b>Tham Mưu</b>: phân tích & tư vấn quyết định — xử lý khiếu nại, chiến lược, kế hoạch, soi rủi ro. → /eimi',
+        '👑💋 <b>Yui Hatano</b> (Grok) — <b>Thám Tử</b>: tra cứu & kiểm chứng — tin tức, thông tin, giá thị trường. → /yui',
+        '💙🌊 <b>Sora Aoi</b> (DeepSeek) — <b>Thợ Tính</b>: tính toán & số liệu — tính cước, quy đổi yên→VND, tính giá đơn, code. → /sora',
+        '✨🌙 <b>Tsukasa Aoi</b> (Gemini) — <b>Học Việc đa năng</b>: tóm tắt, việc thường ngày, dự phòng khi đồng đội bận/hết lượt. → /tsukasa',
+        '',
+        '<i>Nhắn việc tự do → Bot Tổng tự giao cho đúng nàng theo bảng này. Muốn chỉ định thẳng thì dùng lệnh tắt của nàng đó.</i>',
+      ];
+      return tg.sendMessage(chatId, lines.join('\n'));
     }
     if (text.startsWith('/nao')) {
       const lines = ['🧠 <b>Trạng thái các bộ não hôm nay:</b>'];
@@ -247,6 +285,22 @@ app.post(`/${WEBHOOK_SECRET}`, async (req, res) => {
     handleMessage(update.message).catch((e) => console.error(e));
   }
 });
+
+// Báo cáo doanh thu ngày hôm trước — 8:00 sáng giờ VN, vào nhóm điều hành
+if (GROUP_CHAT_ID && revenue.configured()) {
+  cron.schedule(
+    '0 8 * * *',
+    async () => {
+      try {
+        await tg.sendMessage(GROUP_CHAT_ID, await revenue.reportYesterday());
+        console.log('Đã gửi báo cáo doanh thu 8:00');
+      } catch (e) {
+        console.error('Lỗi báo cáo doanh thu 8:00:', e);
+      }
+    },
+    { timezone: 'Asia/Saigon' }
+  );
+}
 
 // Báo cáo lead cuối ngày (21:00 giờ VN) vào nhóm điều hành
 if (GROUP_CHAT_ID && leads.configured()) {

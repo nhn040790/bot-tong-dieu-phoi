@@ -73,6 +73,7 @@ async function setCommands() {
       { command: 'lead', description: 'Ghi lead vào Google Sheet' },
       { command: 'leads', description: 'Xem lead hôm nay' },
       { command: 'baocao', description: 'Báo cáo lead trong ngày' },
+      { command: 'doanhthu', description: 'Doanh thu hôm qua (từ Sheet đơn hàng)' },
       { command: 'gpt', description: 'Yua Mikami (GPT): viết lách, dịch' },
       { command: 'claude', description: 'Eimi Fukada (Claude): phân tích, tư vấn' },
       { command: 'grok', description: 'Yui Hatano (Grok): tra cứu, hỏi đáp' },
@@ -85,6 +86,7 @@ async function setCommands() {
       { command: 'tsukasa', description: 'Lệnh tắt → Tsukasa Aoi (Gemini)' },
       { command: 'hoi3nao', description: 'Hỏi tất cả các bộ não cùng lúc' },
       { command: 'nao', description: 'Trạng thái các bộ não' },
+      { command: 'phanviec', description: 'Bảng phân việc của 5 bộ não' },
       { command: 'help', description: 'Danh sách lệnh đầy đủ' },
     ],
   });
