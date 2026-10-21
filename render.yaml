@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: bot-tong-dieu-phoi
+    runtime: node
+    region: singapore
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
