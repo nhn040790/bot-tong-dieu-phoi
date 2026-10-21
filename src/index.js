@@ -39,10 +39,13 @@ const HELP = [
   '/id — xem ID của bạn và ID nhóm',
   '',
   '🧠 <b>Các bộ não AI:</b>',
-  '/gpt &lt;việc&gt; — ✍️ Thợ Chữ (GPT): viết caption, bài đăng, dịch',
-  '/claude &lt;việc&gt; — 🧭 Tham Mưu (Claude): phân tích, tư vấn, kế hoạch',
-  '/grok &lt;việc&gt; — 🔎 Thám Tử (Grok): tra cứu, hỏi đáp',
-  '/hoi3nao &lt;câu hỏi&gt; — hỏi cả 3 bộ não để so sánh',
+  '/gpt &lt;việc&gt; — 🌸💋 Yua Mikami (GPT): viết caption, bài đăng, dịch',
+  '/claude &lt;việc&gt; — 😏🔥 Eimi Fukada (Claude): phân tích, tư vấn, kế hoạch',
+  '/grok &lt;việc&gt; — 👑💋 Yui Hatano (Grok): tra cứu, hỏi đáp',
+  '/deepseek &lt;việc&gt; — 💙🌊 Sora Aoi (DeepSeek): suy luận, tính toán, code',
+  '/gemini &lt;việc&gt; — ✨🌙 Tsukasa Aoi (Gemini): việc chung',
+  '<i>Lệnh tắt theo tên: /yua · /eimi · /yui · /sora · /tsukasa (dùng thay cho các lệnh trên)</i>',
+  '/hoi3nao &lt;câu hỏi&gt; — hỏi tất cả các bộ não để so sánh',
   '/nao — trạng thái + lượt dùng hôm nay của các bộ não',
   '',
   '<i>Nhắn tự do cũng được: "tỷ giá", "3kg bay", "lead 09xxxx tên khách"...</i>',
@@ -51,7 +54,8 @@ const HELP = [
 
 function brainLabel(id) {
   const b = brains.BRAINS[id];
-  return `${b.icon} ${b.name} (${b.brand}):`;
+  const L = brains.label(id);
+  return `${L.icon} ${L.name} (${b.brand}):`;
 }
 
 const BRAIN_REASONS = {
@@ -64,16 +68,29 @@ const BRAIN_REASONS = {
   error: 'gặp lỗi',
 };
 
-async function replyBrain(chatId, brainId, prompt) {
+async function replyBrain(chatId, brainId, prompt, replyTo) {
   const b = brains.BRAINS[brainId];
+  const L = brains.label(brainId);
   if (!brains.hasKey(brainId)) {
-    return tg.sendMessage(chatId, `⚠️ ${b.icon} ${b.name} (${b.brand}) chưa có API key. Thêm biến <code>${b.keyEnv}</code> trên Render để kích hoạt.`);
+    return tg.sendMessage(chatId, `⚠️ ${L.icon} ${L.name} (${b.brand}) chưa có API key. Thêm biến <code>${b.keyEnv}</code> trên Render để kích hoạt.`);
   }
-  await tg.sendTyping(chatId);
+  await tg.sendTyping(chatId, brains.botToken(brainId) || undefined);
   const r = await brains.ask(brainId, prompt);
-  if (r.ok) return tg.sendPlain(chatId, `${brainLabel(brainId)}\n${r.text}`);
+  if (r.ok) return deliverBrainReply(chatId, brainId, r.text, replyTo);
   const detail = r.message ? ` (${String(r.message).slice(0, 200)})` : '';
-  return tg.sendMessage(chatId, `❌ ${b.name} ${BRAIN_REASONS[r.reason] || r.reason}${detail}. Anh thử bộ não khác, hoặc nhắn việc tự do để Bot Tổng tự chọn não dự phòng.`);
+  return tg.sendMessage(chatId, `❌ ${L.name} ${BRAIN_REASONS[r.reason] || r.reason}${detail}. Anh thử bộ não khác, hoặc nhắn việc tự do để Bot Tổng tự chọn não dự phòng.`);
+}
+
+// Gửi câu trả lời của 1 bộ não: ưu tiên bằng TÀI KHOẢN BOT RIÊNG của chính nó (tên + avatar riêng trong nhóm);
+// chưa có bot riêng, hoặc gửi lỗi (chưa được thêm vào nhóm), thì Bot Tổng gửi thay kèm nhãn tên.
+async function deliverBrainReply(chatId, brainId, text, replyTo, note = '') {
+  const token = brains.botToken(brainId);
+  if (token) {
+    const sent = await tg.sendPlain(chatId, text, token, replyTo);
+    if (sent && sent.ok) return sent;
+    console.error(`Bot riêng của ${brainId} gửi lỗi — chuyển qua Bot Tổng`);
+  }
+  return tg.sendPlain(chatId, `${brainLabel(brainId)}${note}\n${text}`, undefined, replyTo);
 }
 
 async function handleMessage(msg) {
@@ -159,12 +176,14 @@ async function handleMessage(msg) {
       return tg.sendMessage(chatId, leads.formatLeadList(rows, '📋 <b>Lead hôm nay</b>'));
     }
 
-    // --- Giai đoạn 2: các bộ não AI ---
-    const brainCmd = text.match(/^\/(gpt|claude|grok|gemini)\s+([\s\S]+)$/);
+    // --- Giai đoạn 2: các bộ não AI (có lệnh tắt theo tên riêng) ---
+    const BRAIN_ALIASES = { yua: 'gpt', eimi: 'claude', yui: 'grok', sora: 'deepseek', tsukasa: 'gemini' };
+    const brainCmd = text.match(/^\/(gpt|claude|grok|gemini|deepseek|yua|eimi|yui|sora|tsukasa)\s+([\s\S]+)$/);
     if (brainCmd) {
-      return replyBrain(chatId, brainCmd[1], brainCmd[2].trim());
+      const target = BRAIN_ALIASES[brainCmd[1]] || brainCmd[1];
+      return replyBrain(chatId, target, brainCmd[2].trim(), msg.message_id);
     }
-    if (/^\/(gpt|claude|grok|gemini)$/.test(text)) {
+    if (/^\/(gpt|claude|grok|gemini|deepseek|yua|eimi|yui|sora|tsukasa)$/.test(text)) {
       return tg.sendMessage(chatId, `Ví dụ đúng: ${text} viết caption bán áo khoác Nhật`);
     }
     if (text.startsWith('/hoi3nao')) {
@@ -176,8 +195,8 @@ async function handleMessage(msg) {
       await tg.sendTyping(chatId);
       const results = await router.askAll(prompt);
       for (const r of results) {
-        if (r.ok) await tg.sendPlain(chatId, `${brainLabel(r.brainId)}\n${r.text}`);
-        else await tg.sendMessage(chatId, `❌ ${brains.BRAINS[r.brainId].name} không trả lời được (${BRAIN_REASONS[r.reason] || r.reason}${r.message ? ' — ' + String(r.message).slice(0, 200) : ''}).`);
+        if (r.ok) await deliverBrainReply(chatId, r.brainId, r.text, msg.message_id);
+        else await tg.sendMessage(chatId, `❌ ${brains.label(r.brainId).name} không trả lời được (${BRAIN_REASONS[r.reason] || r.reason}${r.message ? ' — ' + String(r.message).slice(0, 200) : ''}).`);
       }
       return;
     }
@@ -191,9 +210,9 @@ async function handleMessage(msg) {
             : s.gateReason === 'cap'
               ? '🔴 hết lượt hôm nay'
               : '⏸ tạm nghỉ';
-        lines.push(`${s.icon} <b>${s.name}</b> (${s.brand} · ${s.model}) — ${st} — đã dùng ${s.used}/${s.cap}`);
+        lines.push(`${s.icon} <b>${s.name}</b> (${s.brand} · ${s.model}) — ${st} — đã dùng ${s.used}/${s.cap}${s.hasBot ? ' · 🏠 có bot riêng' : ''}`);
       }
-      lines.push('', '<i>Đổi model: sửa biến OPENAI_MODEL / ANTHROPIC_MODEL / XAI_MODEL / GEMINI_MODEL trên Render.</i>');
+      lines.push('', '<i>Đổi model: sửa biến OPENAI_MODEL / ANTHROPIC_MODEL / XAI_MODEL / DEEPSEEK_MODEL / GEMINI_MODEL trên Render.</i>');
       return tg.sendMessage(chatId, lines.join('\n'));
     }
 
@@ -205,10 +224,10 @@ async function handleMessage(msg) {
       await tg.sendTyping(chatId);
       const r = await router.askAuto(text);
       if (r.ok) {
-        const label = brainLabel(r.brainId) + (r.fellBack ? ' (não chính bận — đã chuyển dự phòng)' : '');
-        return tg.sendPlain(chatId, `${label}\n${r.text}`);
+        const note = r.fellBack ? ' (não chính bận — đã chuyển dự phòng)' : '';
+        return deliverBrainReply(chatId, r.brainId, r.text, msg.message_id, note);
       }
-      return tg.sendMessage(chatId, `❌ Cả 4 bộ não đều không trả lời được lúc này. Chi tiết: ${r.notes.join(' · ') || 'chưa có não nào có key'}. Gõ /nao để xem trạng thái.`);
+      return tg.sendMessage(chatId, `❌ Tất cả các bộ não đều không trả lời được lúc này. Chi tiết: ${r.notes.join(' · ') || 'chưa có não nào có key'}. Gõ /nao để xem trạng thái.`);
     }
 
     // --- Không rõ lệnh ---
@@ -252,6 +271,8 @@ app.listen(PORT, async () => {
     const url = `${base}/${WEBHOOK_SECRET}`;
     const r = await tg.setWebhook(url);
     console.log('Đặt webhook:', url, r.ok ? 'OK' : r.description);
+    const c = await tg.setCommands();
+    console.log('Đăng ký menu lệnh:', c.ok ? 'OK' : c.description);
   } else {
     console.log('Chưa có RENDER_EXTERNAL_URL/BOT_TOKEN — bỏ qua đặt webhook.');
   }
