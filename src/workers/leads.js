@@ -37,7 +37,7 @@ async function addLead({ name = '', phone, source = 'Telegram' }) {
   await s.spreadsheets.values.append({
     spreadsheetId: process.env.LEADS_SHEET_ID,
     range: `${SHEET_NAME}!A:E`,
-    valueInputOption: 'USER_ENTERED',
+    valueInputOption: 'RAW', // RAW để SĐT giữ nguyên số 0 ở đầu (USER_ENTERED sẽ bị Sheet hiểu là số và cắt mất)
     requestBody: { values: [[nowVN(), name, phone, source, 'Mới']] },
   });
   return { ok: true };
