@@ -72,7 +72,8 @@ async function replyBrain(chatId, brainId, prompt) {
   await tg.sendTyping(chatId);
   const r = await brains.ask(brainId, prompt);
   if (r.ok) return tg.sendPlain(chatId, `${brainLabel(brainId)}\n${r.text}`);
-  return tg.sendMessage(chatId, `❌ ${b.name} ${BRAIN_REASONS[r.reason] || r.reason}. Anh thử bộ não khác, hoặc nhắn việc tự do để Bot Tổng tự chọn não dự phòng.`);
+  const detail = r.message ? ` (${String(r.message).slice(0, 200)})` : '';
+  return tg.sendMessage(chatId, `❌ ${b.name} ${BRAIN_REASONS[r.reason] || r.reason}${detail}. Anh thử bộ não khác, hoặc nhắn việc tự do để Bot Tổng tự chọn não dự phòng.`);
 }
 
 async function handleMessage(msg) {
@@ -176,7 +177,7 @@ async function handleMessage(msg) {
       const results = await router.askAll(prompt);
       for (const r of results) {
         if (r.ok) await tg.sendPlain(chatId, `${brainLabel(r.brainId)}\n${r.text}`);
-        else await tg.sendMessage(chatId, `❌ ${brains.BRAINS[r.brainId].name} không trả lời được (${BRAIN_REASONS[r.reason] || r.reason}).`);
+        else await tg.sendMessage(chatId, `❌ ${brains.BRAINS[r.brainId].name} không trả lời được (${BRAIN_REASONS[r.reason] || r.reason}${r.message ? ' — ' + String(r.message).slice(0, 200) : ''}).`);
       }
       return;
     }
@@ -207,7 +208,7 @@ async function handleMessage(msg) {
         const label = brainLabel(r.brainId) + (r.fellBack ? ' (não chính bận — đã chuyển dự phòng)' : '');
         return tg.sendPlain(chatId, `${label}\n${r.text}`);
       }
-      return tg.sendMessage(chatId, '❌ Cả 4 bộ não đều không trả lời được lúc này (hết lượt/hết quota?). Gõ /nao để xem trạng thái.');
+      return tg.sendMessage(chatId, `❌ Cả 4 bộ não đều không trả lời được lúc này. Chi tiết: ${r.notes.join(' · ') || 'chưa có não nào có key'}. Gõ /nao để xem trạng thái.`);
     }
 
     // --- Không rõ lệnh ---
