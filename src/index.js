@@ -217,11 +217,13 @@ async function handleMessage(msg) {
         return tg.sendMessage(chatId, '⚠️ Chưa có bộ não nào có API key. Thêm key trên Render trước nhé.');
       }
       await tg.sendTyping(chatId);
-      const results = await router.askAll(prompt);
-      for (const r of results) {
-        if (r.ok) await deliverBrainReply(chatId, r.brainId, r.text, msg.message_id);
-        else await tg.sendMessage(chatId, `❌ ${brains.label(r.brainId).name} không trả lời được (${BRAIN_REASONS[r.reason] || r.reason}${r.message ? ' — ' + String(r.message).slice(0, 200) : ''}).`);
-      }
+      // Phát trực tiếp: nàng nào trả lời xong trước thì lên tiếng trước — 1 nàng chậm/lỗi không làm cả đội im lặng
+      const jobs = brains.ORDER.filter((id) => brains.hasKey(id)).map(async (id) => {
+        const r = await brains.ask(id, prompt);
+        if (r.ok) await deliverBrainReply(chatId, id, r.text, msg.message_id);
+        else await tg.sendMessage(chatId, `❌ ${brains.label(id).name} không trả lời được (${BRAIN_REASONS[r.reason] || r.reason}${r.message ? ' — ' + String(r.message).slice(0, 200) : ''}).`);
+      });
+      await Promise.allSettled(jobs);
       return;
     }
     if (text.startsWith('/phanviec') || text.startsWith('/viec')) {
