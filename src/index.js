@@ -29,6 +29,21 @@ function isOwner(userId) {
   return OWNER_IDS.includes(String(userId));
 }
 
+// Admin của nhóm cũng được dùng bot như chủ bot (user yêu cầu 2026-10-22):
+// hỏi Telegram vai trò của người gửi trong chính nhóm đó, đệm kết quả 5 phút cho đỡ tốn lượt gọi.
+const adminCache = new Map(); // `${chatId}:${userId}` -> { admin, at }
+async function isGroupAdmin(chatId, userId) {
+  if (!chatId || chatId > 0 || !userId) return false; // chỉ áp dụng trong nhóm (chatId âm)
+  const key = `${chatId}:${userId}`;
+  const hit = adminCache.get(key);
+  if (hit && Date.now() - hit.at < 5 * 60 * 1000) return hit.admin;
+  let admin = false;
+  const r = await tg.getChatMember(chatId, userId);
+  if (r && r.ok && r.result) admin = r.result.status === 'creator' || r.result.status === 'administrator';
+  adminCache.set(key, { admin, at: Date.now() });
+  return admin;
+}
+
 const HELP = [
   '🤖 <b>Bot Tổng — danh sách lệnh:</b>',
   '/tygia — tỷ giá yên hôm nay',
@@ -114,7 +129,8 @@ async function handleMessage(msg) {
     return;
   }
 
-  if (!isOwner(userId)) return; // chỉ nghe lệnh của chủ bot
+  // Quyền dùng bot: chủ bot (OWNER_IDS) hoặc admin của chính nhóm đang nhắn
+  if (!isOwner(userId) && !(await isGroupAdmin(chatId, userId))) return;
 
   const lower = text.toLowerCase();
 

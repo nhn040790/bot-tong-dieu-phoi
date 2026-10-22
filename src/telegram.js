@@ -92,4 +92,9 @@ async function setCommands() {
   });
 }
 
-module.exports = { sendMessage, sendTyping, sendPlain, setWebhook, setCommands };
+// Kiểm tra vai trò của 1 người trong 1 nhóm (creator/administrator/member...) — dùng để mở quyền dùng bot cho admin nhóm
+async function getChatMember(chatId, userId) {
+  return call('getChatMember', { chat_id: chatId, user_id: userId });
+}
+
+module.exports = { sendMessage, sendTyping, sendPlain, setWebhook, setCommands, getChatMember };
