@@ -1,4 +1,7 @@
 // Tiện ích gọi Telegram Bot API — hỗ trợ gửi bằng nhiều tài khoản bot (Bot Tổng + bot riêng từng bộ não)
+const fs = require('fs');
+const path = require('path');
+
 const TOKEN = process.env.BOT_TOKEN;
 
 async function call(method, body, token) {
@@ -74,11 +77,11 @@ async function setCommands() {
       { command: 'leads', description: 'Xem lead hôm nay' },
       { command: 'baocao', description: 'Báo cáo lead trong ngày' },
       { command: 'doanhthu', description: 'Doanh thu hôm qua (từ Sheet đơn hàng)' },
-      { command: 'gpt', description: 'Yua Mikami (GPT): viết lách, dịch' },
-      { command: 'claude', description: 'Eimi Fukada (Claude): phân tích, tư vấn' },
-      { command: 'grok', description: 'Yui Hatano (Grok): tra cứu, hỏi đáp' },
-      { command: 'deepseek', description: 'Sora Aoi (DeepSeek): tính toán, code' },
-      { command: 'gemini', description: 'Tsukasa Aoi (Gemini): việc chung' },
+      { command: 'gpt', description: 'Yua Mikami (GPT): biên kịch, caption' },
+      { command: 'claude', description: 'Eimi Fukada (Claude): đạo diễn, chiến lược' },
+      { command: 'grok', description: 'Yui Hatano (Grok): bắt trend, tra cứu' },
+      { command: 'deepseek', description: 'Sora Aoi (DeepSeek): kỹ thuật dựng' },
+      { command: 'gemini', description: 'Tsukasa Aoi (Gemini): phụ đề, việc chung' },
       { command: 'yua', description: 'Lệnh tắt → Yua Mikami (GPT)' },
       { command: 'eimi', description: 'Lệnh tắt → Eimi Fukada (Claude)' },
       { command: 'yui', description: 'Lệnh tắt → Yui Hatano (Grok)' },
@@ -87,6 +90,14 @@ async function setCommands() {
       { command: 'hoi3nao', description: 'Hỏi tất cả các bộ não cùng lúc' },
       { command: 'nao', description: 'Trạng thái các bộ não' },
       { command: 'phanviec', description: 'Bảng phân việc của 5 bộ não' },
+      { command: 'doc', description: '🎬 Dựng: khung dọc 9:16 (gửi kèm video)' },
+      { command: 'vuong', description: '🎬 Dựng: khung vuông 1:1' },
+      { command: 'ngang', description: '🎬 Dựng: khung ngang 16:9' },
+      { command: 'cat', description: '🎬 Dựng: cắt video — /cat 5 20' },
+      { command: 'tocdo', description: '🎬 Dựng: đổi tốc độ — /tocdo 1.5' },
+      { command: 'chu', description: '🎬 Dựng: chèn chữ — /chu Nội dung' },
+      { command: 'anh', description: '🎬 Dựng: trích khung hình' },
+      { command: 'info', description: '🎬 Dựng: thông tin video' },
       { command: 'help', description: 'Danh sách lệnh đầy đủ' },
     ],
   });
@@ -97,4 +108,48 @@ async function getChatMember(chatId, userId) {
   return call('getChatMember', { chat_id: chatId, user_id: userId });
 }
 
-module.exports = { sendMessage, sendTyping, sendPlain, setWebhook, setCommands, getChatMember };
+// Lấy thông tin file trên Telegram (đường dẫn tải) — phục vụ bot thợ Dựng video
+async function getFile(fileId) {
+  return call('getFile', { file_id: fileId });
+}
+
+// Tải file từ Telegram về máy (file_path lấy từ getFile)
+async function downloadToFile(filePath, destPath) {
+  const res = await fetch(`https://api.telegram.org/file/bot${TOKEN}/${filePath}`);
+  if (!res.ok) throw new Error(`Tải file từ Telegram lỗi HTTP ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  fs.writeFileSync(destPath, buf);
+  return buf.length;
+}
+
+// Gửi file (video/ảnh) dạng multipart — Bot API không nhận JSON cho việc tải lên
+async function sendFile(method, field, chatId, filePath, { caption, replyTo } = {}) {
+  try {
+    const form = new FormData();
+    form.append('chat_id', String(chatId));
+    if (caption) {
+      form.append('caption', caption);
+      form.append('parse_mode', 'HTML');
+    }
+    if (method === 'sendVideo') form.append('supports_streaming', 'true');
+    if (replyTo) form.append('reply_parameters', JSON.stringify({ message_id: replyTo }));
+    form.append(field, new Blob([fs.readFileSync(filePath)]), path.basename(filePath));
+    const res = await fetch(`https://api.telegram.org/bot${TOKEN}/${method}`, { method: 'POST', body: form });
+    const data = await res.json();
+    if (!data.ok) console.error(`Telegram API ${method} lỗi:`, data.description);
+    return data;
+  } catch (err) {
+    console.error(`Telegram API ${method} lỗi mạng:`, err.message);
+    return { ok: false, description: `network: ${err.message}` };
+  }
+}
+
+function sendVideoFile(chatId, filePath, opts) {
+  return sendFile('sendVideo', 'video', chatId, filePath, opts);
+}
+
+function sendPhotoFile(chatId, filePath, opts) {
+  return sendFile('sendPhoto', 'photo', chatId, filePath, opts);
+}
+
+module.exports = { sendMessage, sendTyping, sendPlain, setWebhook, setCommands, getChatMember, getFile, downloadToFile, sendVideoFile, sendPhotoFile };

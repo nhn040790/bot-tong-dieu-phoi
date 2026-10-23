@@ -5,10 +5,14 @@
 //   - Giai đoạn 2: 3 bộ não AI (GPT/Claude/Grok) + Gemini dự phòng — việc tự do, /gpt /claude /grok /hoi3nao
 const express = require('express');
 const cron = require('node-cron');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const tg = require('./telegram');
 const exchange = require('./workers/exchange');
 const leads = require('./workers/leads');
 const revenue = require('./workers/revenue');
+const video = require('./workers/video');
 const brains = require('./brains/brains');
 const router = require('./brains/router');
 
@@ -18,6 +22,8 @@ const OWNER_IDS = (process.env.OWNER_IDS || '')
   .map((s) => s.trim())
   .filter(Boolean);
 const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || '';
+// Công tắc báo cáo tự động: đặt AUTO_REPORTS=off trên Render để TẮT TẠM báo cáo doanh thu 8:00 + lead 21:00 (bật lại: xóa biến này)
+const AUTO_REPORTS = process.env.AUTO_REPORTS !== 'off';
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || 'webhook';
 
 const app = express();
@@ -56,15 +62,21 @@ const HELP = [
   '/id — xem ID của bạn và ID nhóm',
   '',
   '🧠 <b>Các bộ não AI:</b>',
-  '/gpt &lt;việc&gt; — 🌸💋 Yua Mikami (GPT): viết caption, bài đăng, dịch',
-  '/claude &lt;việc&gt; — 😏🔥 Eimi Fukada (Claude): phân tích, tư vấn, kế hoạch',
-  '/grok &lt;việc&gt; — 👑💋 Yui Hatano (Grok): tra cứu, hỏi đáp',
-  '/deepseek &lt;việc&gt; — 💙🌊 Sora Aoi (DeepSeek): suy luận, tính toán, code',
-  '/gemini &lt;việc&gt; — ✨🌙 Tsukasa Aoi (Gemini): việc chung',
+  '/gpt &lt;việc&gt; — 🌸💋 Yua Mikami (GPT): biên kịch — kịch bản, hook, caption',
+  '/claude &lt;việc&gt; — 😏🔥 Eimi Fukada (Claude): đạo diễn — chiến lược, đánh giá concept',
+  '/grok &lt;việc&gt; — 👑💋 Yui Hatano (Grok): bắt trend, tra cứu',
+  '/deepseek &lt;việc&gt; — 💙🌊 Sora Aoi (DeepSeek): kỹ thuật dựng, CapCut/Premiere',
+  '/gemini &lt;việc&gt; — ✨🌙 Tsukasa Aoi (Gemini): phụ đề, việc chung',
   '<i>Lệnh tắt theo tên: /yua · /eimi · /yui · /sora · /tsukasa (dùng thay cho các lệnh trên)</i>',
   '/hoi3nao &lt;câu hỏi&gt; — hỏi tất cả các bộ não để so sánh',
   '/nao — trạng thái + lượt dùng hôm nay của các bộ não',
   '/phanviec — bảng phân việc: nàng nào phụ trách mảng nào',
+  '',
+  '🎬 <b>Dựng video</b> (gửi video kèm chú thích là lệnh, hoặc reply vào 1 video rồi gõ lệnh):',
+  '/doc — khung dọc 9:16 · /vuong — vuông 1:1 · /ngang — ngang 16:9 (đệm nền mờ)',
+  '/cat 5 20 — cắt từ giây 5 đến 20 · /cat 10 — lấy 10 giây đầu',
+  '/tocdo 1.5 — đổi tốc độ · /chu Nội dung — chèn chữ dưới video',
+  '/anh — trích khung hình · /info — thông tin video (bot tải được tối đa 20MB)',
   '',
   '<i>Nhắn tự do cũng được: "tỷ giá", "3kg bay", "lead 09xxxx tên khách"...</i>',
   '<i>Hoặc giao 1 việc bất kỳ (vd "viết caption bán giày Nhật") → Bot Tổng tự chọn bộ não phù hợp.</i>',
@@ -111,11 +123,45 @@ async function deliverBrainReply(chatId, brainId, text, replyTo, note = '') {
   return tg.sendPlain(chatId, `${brainLabel(brainId)}${note}\n${text}`, undefined, replyTo);
 }
 
+// Bot thợ DỰNG VIDEO: tải file từ Telegram → ffmpeg xử lý → gửi lại vào nhóm, dọn file tạm sau khi xong
+async function handleVideoCommand(chatId, msg, source, vCmd) {
+  if (!video.ready()) {
+    return tg.sendMessage(chatId, '⚠️ Máy dựng chưa sẵn sàng trên server (thiếu ffmpeg) — báo Muse kiểm tra bản deploy giúp em.');
+  }
+  if (!vCmd) return tg.sendMessage(chatId, video.VIDEO_HELP);
+  if (source.fileSize && source.fileSize > video.MAX_INPUT) {
+    return tg.sendMessage(chatId, `⚠️ Video nặng ${(source.fileSize / 1024 / 1024).toFixed(1)}MB — Telegram chỉ cho bot tải file tối đa 20MB. Anh gửi clip ngắn hoặc bản nén nhẹ hơn giúp em.`);
+  }
+  if (video.isBusy()) {
+    return tg.sendMessage(chatId, '⏳ Máy dựng đang xử lý 1 video khác — anh chờ xong rồi gửi lại lệnh nhé.');
+  }
+  await tg.sendMessage(chatId, `🎬 Đã nhận lệnh /${vCmd.cmd} — đang dựng, video càng dài càng lâu, anh chờ em chút...`);
+  let inPath = null;
+  let outPath = null;
+  try {
+    const gf = await tg.getFile(source.fileId);
+    if (!gf.ok || !gf.result) throw new Error('Không lấy được file từ Telegram.');
+    inPath = path.join(os.tmpdir(), `vid_in_${Date.now()}.mp4`);
+    await tg.downloadToFile(gf.result.file_path, inPath);
+    const r = await video.processCommand(inPath, vCmd.cmd, vCmd.arg);
+    if (r.busy) return tg.sendMessage(chatId, '⏳ Máy dựng đang bận — anh gửi lại lệnh sau ít phút nhé.');
+    outPath = r.outPath || null;
+    if (r.kind === 'info') return tg.sendMessage(chatId, r.note);
+    if (r.kind === 'photo') return tg.sendPhotoFile(chatId, outPath, { caption: r.note, replyTo: msg.message_id });
+    return tg.sendVideoFile(chatId, outPath, { caption: r.note, replyTo: msg.message_id });
+  } catch (e) {
+    console.error('Lỗi dựng video:', e.message);
+    return tg.sendMessage(chatId, `❌ Dựng thất bại: ${String(e.message).slice(0, 220)}`);
+  } finally {
+    for (const p of [inPath, outPath]) if (p) fs.unlink(p, () => {});
+  }
+}
+
 async function handleMessage(msg) {
   const chatId = msg.chat.id;
   const userId = msg.from && msg.from.id;
-  const text = (msg.text || '').trim();
-  if (!text) return;
+  const text = (msg.text || msg.caption || '').trim();
+  if (!text && !video.findVideoSource(msg)) return;
 
   // Chế độ bootstrap: chưa cấu hình OWNER_IDS → /start trả về ID để chủ bot tự cấu hình
   if (!OWNER_IDS.length) {
@@ -131,6 +177,16 @@ async function handleMessage(msg) {
 
   // Quyền dùng bot: chủ bot (OWNER_IDS) hoặc admin của chính nhóm đang nhắn
   if (!isOwner(userId) && !(await isGroupAdmin(chatId, userId))) return;
+
+  // --- Bot thợ DỰNG VIDEO: tin có video (hoặc reply vào 1 video) kèm lệnh dựng ---
+  const vSource = video.findVideoSource(msg);
+  const vCmd = video.parseVideoCommand(text);
+  if (vCmd && !vSource) {
+    return tg.sendMessage(chatId, '🎬 Lệnh dựng cần kèm video anh nhé: gửi video vào nhóm với chú thích là lệnh (ví dụ chú thích "/doc"), hoặc reply vào 1 video có sẵn rồi gõ lệnh.');
+  }
+  if (vSource && (vCmd || !text)) {
+    return handleVideoCommand(chatId, msg, vSource, vCmd);
+  }
 
   const lower = text.toLowerCase();
 
@@ -244,13 +300,13 @@ async function handleMessage(msg) {
     }
     if (text.startsWith('/phanviec') || text.startsWith('/viec')) {
       const lines = [
-        '📋 <b>Bảng phân việc — đội trợ lý AI HikariGo:</b>',
+        '🎬 <b>Bảng phân việc — đội sản xuất video:</b>',
         '',
-        '🌸💋 <b>Yua Mikami</b> (GPT) — <b>Thợ Chữ</b>: nội dung & chăm khách — viết caption, bài đăng, tin nhắn mẫu, dịch Nhật↔Việt, slogan. → /yua',
-        '😏🔥 <b>Eimi Fukada</b> (Claude) — <b>Tham Mưu</b>: phân tích & tư vấn quyết định — xử lý khiếu nại, chiến lược, kế hoạch, soi rủi ro. → /eimi',
-        '👑💋 <b>Yui Hatano</b> (Grok) — <b>Thám Tử</b>: tra cứu & kiểm chứng — tin tức, thông tin, giá thị trường. → /yui',
-        '💙🌊 <b>Sora Aoi</b> (DeepSeek) — <b>Thợ Tính</b>: tính toán & số liệu — tính cước, quy đổi yên→VND, tính giá đơn, code. → /sora',
-        '✨🌙 <b>Tsukasa Aoi</b> (Gemini) — <b>Học Việc đa năng</b>: tóm tắt, việc thường ngày, dự phòng khi đồng đội bận/hết lượt. → /tsukasa',
+        '🌸💋 <b>Yua Mikami</b> (GPT) — <b>Biên Kịch</b>: kịch bản video ngắn, hook 3 giây đầu, caption, tiêu đề, lời thoại, dịch phụ đề. → /yua',
+        '😏🔥 <b>Eimi Fukada</b> (Claude) — <b>Đạo Diễn</b>: chiến lược kênh, đánh giá concept & kịch bản, kế hoạch series. → /eimi',
+        '👑💋 <b>Yui Hatano</b> (Grok) — <b>Bắt Trend</b>: trend & nhạc đang hot, tra cứu, kiểm chứng thông tin. → /yui',
+        '💙🌊 <b>Sora Aoi</b> (DeepSeek) — <b>Kỹ Thuật Dựng</b>: CapCut/Premiere, hiệu ứng, thông số xuất video, số liệu kênh. → /sora',
+        '✨🌙 <b>Tsukasa Aoi</b> (Gemini) — <b>Phụ Đề & Đa Năng</b>: phụ đề, tóm tắt nội dung, việc thường ngày, dự phòng. → /tsukasa',
         '',
         '<i>Nhắn việc tự do → Bot Tổng tự giao cho đúng nàng theo bảng này. Muốn chỉ định thẳng thì dùng lệnh tắt của nàng đó.</i>',
       ];
@@ -304,8 +360,8 @@ app.post(`/${WEBHOOK_SECRET}`, async (req, res) => {
   }
 });
 
-// Báo cáo doanh thu ngày hôm trước — 8:00 sáng giờ VN, vào nhóm điều hành
-if (GROUP_CHAT_ID && revenue.configured()) {
+// Báo cáo doanh thu ngày hôm trước — 8:00 sáng giờ VN, vào nhóm điều hành (tắt tạm bằng AUTO_REPORTS=off)
+if (AUTO_REPORTS && GROUP_CHAT_ID && revenue.configured()) {
   cron.schedule(
     '0 8 * * *',
     async () => {
@@ -320,8 +376,8 @@ if (GROUP_CHAT_ID && revenue.configured()) {
   );
 }
 
-// Báo cáo lead cuối ngày (21:00 giờ VN) vào nhóm điều hành
-if (GROUP_CHAT_ID && leads.configured()) {
+// Báo cáo lead cuối ngày (21:00 giờ VN) vào nhóm điều hành (tắt tạm bằng AUTO_REPORTS=off)
+if (AUTO_REPORTS && GROUP_CHAT_ID && leads.configured()) {
   cron.schedule(
     '0 21 * * *',
     async () => {
